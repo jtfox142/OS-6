@@ -11,11 +11,17 @@
 #include<errno.h>
 
 #define PERMS 0644
-#define MAX_CHILDREN 18
+#define MAX_CHILDREN 100
+#define MAX_SIMUL_CHILDREN 18
 #define ONE_SECOND 1000000000
 #define HALF_SECOND 500000000
-#define STANDARD_CLOCK_INCREMENT 100000
-#define RESOURCE_TABLE_SIZE 10
+#define NO_PF_INCREMENT 100
+#define MEM_REQUEST_INCREMENT 14000000
+#define PAGE_TABLE_SIZE 32
+#define FRAME_TABLE_SIZE 256
+#define KB 1024
+#define DIRTY 1
+#define CLEAN 0
 
 typedef struct msgBuffer {
 	long mtype;
@@ -23,25 +29,26 @@ typedef struct msgBuffer {
 	pid_t childPid;
 } msgBuffer;
 
+struct Page {
+	int memLocation; //Holds the frame number for this page
+	int pendingEntry; //Set to 1 if this page has entered a request but is currently blocked
+};
+
+struct Frame {
+	int processHeld;
+	int pageHeld;
+	int dirtyBit;
+};
+
 struct PCB {
 	int occupied; //either true or false
 	pid_t pid; //process id of this child
 	int startTimeSeconds; //time when it was created
 	int startTimeNano; //time when it was created
-	int blocked; //describes which resource this process is waiting for
-	int requestVector[10]; //represents how many instances of each resource have been requested
-	int allocationVector[10]; //represents how many instances of each resource have been granted
-};
-
-struct resource {
-	int totalInstances;
-	int availableInstances;
-	/*
-		TODO: Change requestVector to a requestQueue inside of resource.
-		It will be a queue of linked lists that hold both the number of the requested resource
-		and the simulated time at which it was requested. Then, I can attempt to grant outstanding
-		requests first.
-	*/
+	int blocked; //whether this process is able to operate in its present state
+	int eventWaitSeconds; //when does its events happen?
+	int eventWaitNano; //when does its events happen?
+	struct Page pageTable[PAGE_TABLE_SIZE]; //Each page holds an integer referencing the frame in which it is held
 };
 
 //QUEUE CODE ORIGINALLY TAKEN FROM https://www.geeksforgeeks.org/introduction-and-array-implementation-of-queue/
@@ -70,8 +77,10 @@ int shm_id;
 int *simulatedClock;
 //message buffer for passing messages
 msgBuffer buf;
-//Queue for keeping track of blocked (sleeping) processes
-struct Queue *sleepQueue;
+//Queue for keeping track of blocked processes
+struct Queue *blockedQueue;
+//Frame table to hold all the frames
+struct Frame frameTable[FRAME_TABLE_SIZE];
 
 // FUNCTION PROTOTYPES
 
@@ -80,17 +89,16 @@ void help();
 
 //Process table functions
 void initializeProcessTable();
-void startInitialProcesses(int initialChildren);
+void startInitialProcesses(int initialChildren, int *childCounter);
 void initializePCB(pid_t pid);
 void outputProcessTable();
 
 //OSS functions
 void incrementClock(int timePassed);
-void launchChild(int maxSimulChildren, int launchInterval, int *lastLaunchTime);
+void launchChild(int maxSimulChildren, int launchInterval, int *lastLaunchTime, int *childCounter);
 void checkForMessages();
 void updateTable(pid_t process, msgBuffer rcvbuf);
 void nonblockWait();
-void startInitialProcesses(int initialChildren);
 void checkOutstandingRequests();
 
 //Program end functions
@@ -105,9 +113,12 @@ void receivingOutput(int chldNum, int chldPid, int systemClock[2], msgBuffer rcv
 void grantResource(pid_t childPid, int resourceNumber, int processNumber);
 void initializeResourceTable();
 void request(pid_t childPid, int resourceNumber);
-int release(pid_t childPid, int resourceNumber, int output);
-void outputResourceTable();
+int release(pid_t childPid);
 int runDeadlockDetection();
+
+//Page and Frame Functions
+void outputFrameTable();
+void outputPageTable();
 
 //Queue functions ORIGINALLY TAKEN FROM https://www.geeksforgeeks.org/introduction-and-array-implementation-of-queue/
 struct Queue* createQueue(unsigned capacity);
@@ -130,8 +141,8 @@ void sendMessage(pid_t childPid, int msg, int output);
 void deadlockTermination();
 
 int main(int argc, char** argv) {
-	//signals to terminate program properly if user hits ctrl+c or 60 seconds pass
-	alarm(60);
+	//signals to terminate program properly if user hits ctrl+c or 5 seconds pass
+	alarm(5);
 	signal(SIGALRM, sighandler);
 	signal(SIGINT, sighandler);	
 
@@ -155,6 +166,8 @@ int main(int argc, char** argv) {
     simulatedClock[1] = 0;
 
 	runningChildren = 0;
+
+	int *childCounter = malloc(sizeof(int));
 	
 
 	//message queue setup
@@ -198,8 +211,8 @@ int main(int argc, char** argv) {
 		}
 	}
 
-	if(proc > MAX_CHILDREN) {
-		printf("Warning: The maximum value of proc is 18. Terminating.\n");
+	if(simul > MAX_SIMUL_CHILDREN) {
+		printf("Warning: The maximum value of simul is 18. Terminating.\n");
 		terminateProgram(6);
 	}
 	
@@ -211,21 +224,20 @@ int main(int argc, char** argv) {
 	//sets all pids in the process table to 0
 	initializeProcessTable();
 
-	resourceTable = malloc(RESOURCE_TABLE_SIZE * sizeof(struct resource));
-	initializeResourceTable();
+	startInitialProcesses(simul, childCounter);
 
-	startInitialProcesses(simul);
+	createFrameTable();
 
 	int *outputTimer = malloc(sizeof(int));
 	*outputTimer = 0;
 
-	int *deadlockDetectionTimer = malloc(sizeof(int));
-	*deadlockDetectionTimer = 0;
-
 	int *lastLaunchTime = malloc(sizeof(int));
 	*lastLaunchTime = 0;
 
-	sleepQueue = createQueue(processTableSize);
+	//Keeps track of blocked PIDs
+	blockedQueue = createQueue(processTableSize);
+	//Records the order in which frames should be replaced
+	struct Queue *fifoQueue = createQueue(FRAME_TABLE_SIZE);
 
 	//stillChildrenToLaunch checks if we have initialized the final PCB yet. 
 	//childrenInSystem checks if any PCBs remain occupied
@@ -236,26 +248,28 @@ int main(int argc, char** argv) {
 
 		//calls another function to check if runningChildren < simul and if timeLimit has been passed
 		//if so, it launches a new child.
-		launchChild(simul, timelimit, lastLaunchTime);
+		launchChild(simul, timelimit, lastLaunchTime, childCounter);
 
-		//Try to grant any outstanding requests 
-		checkOutstandingRequests();//TODO
+		//Check to see if event wait for a child is now finished
+		//If so, its request is granted and its page gets swapped in
+		checkEventWait(fifoQueue); //TODO
 
 		//checks to see if a message has been sent to parent
 		//if so, then it takes proper action
-		checkForMessages();
+		checkForMessages(fifoQueue); //TODO
 
 		//outputs the process table to a log file and the screen every half second
 		//and runs a deadlock detection algorithm every second
 		checkTime(outputTimer, deadlockDetectionTimer);
-
-		incrementClock(STANDARD_CLOCK_INCREMENT);
 	}
 
 	pid_t wpid;
 	int status = 0;
 	while((wpid = wait(&status)) > 0);
 	terminateProgram(SIGTERM);
+	free(childCounter);
+	free(outputTimer);
+	free(lastLaunchTime);
 	return EXIT_SUCCESS;
 }
 
@@ -263,36 +277,108 @@ int main(int argc, char** argv) {
 
 //Checks to see if it can wake up any sleeping processes
 //Rechecks if the resource that a worker requested is now available
-void checkOutstandingRequests() {
-	if(isEmpty(sleepQueue))
+void checkEventWait(struct Queue *fifoQueue) { //TODO
+	if(isEmpty(blockedQueue))
 		return;
 
-	int sleepQueueSize = sleepQueue->size;
-	for(int processCounter = 0; processCounter < sleepQueueSize; processCounter++) {
-		int currentPid = dequeue(sleepQueue);
+	int blockedQueueSize = blockedQueue->size;
+	for(int processCounter = 0; processCounter < blockedQueueSize; processCounter++) {
+		int currentPid = dequeue(blockedQueue);
 		int entry = findTableIndex(currentPid);
 
 		//Should never happen, but just in case
 		if(!processTable[entry].occupied)
 			continue;
 
-		for(int resourceCounter = 0; resourceCounter < RESOURCE_TABLE_SIZE; resourceCounter++) {
-			if(!processTable[entry].requestVector[resourceCounter])
-				continue;
-			
-			if(resourceTable[resourceCounter].availableInstances > 0) {
-				fprintf(fptr, "MASTER: Waking process %d\n", currentPid);
-				processTable[entry].blocked = 0;
-				grantResource(currentPid, resourceCounter, entry);
-				return;
-			}
+		if(simulatedClock[0] >= processTable[entry].eventWaitSeconds && simulatedClock[1] > processTable[entry].eventWaitNano) {
+			processTable[entry].blocked = 0;
+			processTable[entry].eventWaitNano = 0;
+			processTable[entry].eventWaitSeconds = 0;
+			fifoReplacementAlgo(currentPid, fifoQueue); //TODO
+			sendMessage(currentPid, MSG);//TODO
+			return;
 		}
-		enqueue(sleepQueue, currentPid);
+		enqueue(blockedQueue, currentPid);
 	}
 
 }
 
-void startInitialProcesses(int initialChildren) {
+void fifoReplacementAlgo(pid_t incomingProcess, struct Queue *fifoQueue) {
+	int frameToUse;
+	//Check first to see if there are any empty frames
+	if(!isFull(fifoQueue)) {
+		frameToUse = findEmptyFrame();
+	}
+	else {
+		//Otherwise, fetch the (comparatively) first frame to receive an entry
+		frameToUse = dequeue(fifoQueue);
+	}
+	//Should never happen, but just in case
+	if(frameToUse < 0 || frameToUse > 255) {
+		perror("Error in fifoReplacementAlgo: frame out of bounds.\n");
+		exit(1);
+	}
+	//Remove the process and page from that frame
+	pid_t outgoingProcess = clearFrame(frameToUse);
+	//Find the index of the page that is being added to the frame
+	int incomingPage = findPendingPage(incomingProcess);
+	//Add the new page and process to the frame, set the dirty bit to zero
+	addToFrame(frameToUse, incomingProcess, incomingPage); 
+
+	//Remove the frame location from the outgoing process's page table
+	removeFromPageTable(outgoingProcess, frameToUse);
+	//Add the frame location to the page table of the incoming process and remove the pending marker
+	addToPageTable(incomingProcess, incomingPage, frameToUse);
+}
+
+//Adds values to a frame
+void addToFrame(int frameNumber, pid_t process, int pageNumber) {
+	int oldPage = frameTable[frameNumber].pageHeld;
+	frameTable[frameNumber].processHeld = process;
+	frameTable[frameNumber].pageHeld = pageNumber;
+	frameTable[frameNumber].dirtyBit = CLEAN;
+}
+
+int findEmptyFrame() {
+	for(int frameCount = 0; frameCount < FRAME_TABLE_SIZE; frameCount++) {
+		if(frameTable[frameCount].processHeld == -1)
+			return frameCount;
+	}
+	return -1;
+}
+
+//Returns the number of the page that is currently awaiting entry into the frame table
+int findPendingPage(pid_t process) {
+	int entry = findTableIndex(process);
+	for(int pageCount = 0; pageCount < PAGE_TABLE_SIZE; pageCount++) {
+		if(processTable[entry].pageTable[pageCount].pendingEntry) {
+			return(pageCount);
+		}
+	}
+
+	return -1;
+}
+
+void addToPageTable(pid_t process, int pageNumber, int frameNumber) {
+	int entry = findTableIndex(process);
+
+	processTable[entry].pageTable[pageNumber].memLocation = frameNumber;
+	processTable[entry].pageTable[pageNumber].pendingEntry = 0;
+}
+
+void removeFromPageTable(pid_t process, int frameNumber) {
+	int entry = findTableIndex(process);
+	
+	for(int pageCounter = 0; pageCounter < PAGE_TABLE_SIZE; pageCounter++) {
+		if(processTable[entry].pageTable[pageCounter].memLocation == frameNumber) {
+			processTable[entry].pageTable[pageCounter].memLocation = -1;
+			processTable[entry].pageTable[pageCounter].pendingEntry = 0;
+			return;
+		}
+	}
+}
+
+void startInitialProcesses(int initialChildren, int *childCounter) {
 	int lowerValue;
 	(initialChildren < processTableSize) ? (lowerValue = initialChildren) : (lowerValue = processTableSize);
 	
@@ -311,10 +397,12 @@ void startInitialProcesses(int initialChildren) {
        		}
 		else {
 			initializePCB(newChild);
-			printf("MASTER: Launching Child PID %d\n", newChild);
+			printf("oss: Launching Child PID %d\n", newChild);
 			runningChildren++;
 		}
 	}
+
+	*childCounter = lowerValue;
 }
 
 void nonblockWait() {
@@ -329,18 +417,16 @@ void nonblockWait() {
 
 void childTerminated(pid_t terminatedChild) {
 	int entry = findTableIndex(terminatedChild);
-	for(int count = 0; count < RESOURCE_TABLE_SIZE; count++) {
-		while(release(terminatedChild, count, 0));
-		processTable[entry].requestVector[count] = 0;
-	}
+	release(terminatedChild);
+
 	processTable[entry].occupied = 0;
 	processTable[entry].blocked = 0;
 	runningChildren--;
 
-	fprintf(fptr, "MASTER: Child pid %d has terminated and its resources have been released.\n", terminatedChild);
+	fprintf(fptr, "oss: Child pid %d has terminated and its resources have been released.\n", terminatedChild);
 }
 
-void checkForMessages() {
+void checkForMessages(struct Queue *fifoQueue) { //TODO
 	msgBuffer rcvbuf;
 	if(msgrcv(msqid, &rcvbuf, sizeof(msgBuffer), getpid(), IPC_NOWAIT) == -1) {
    		if(errno == ENOMSG) {
@@ -353,17 +439,22 @@ void checkForMessages() {
 			}
 	}
 	else if(rcvbuf.childPid != 0) {
-		takeAction(rcvbuf.childPid, rcvbuf.intData);
+		processRequest(rcvbuf.childPid, rcvbuf.intData);
 	}
 }
 
-void takeAction(pid_t childPid, int msgData) {
-	if(msgData < 10) {
-		request(childPid, msgData);
+void processRequest(pid_t childPid, int frame) {
+	if(pageFault()) { //TODO test for page fault and set up eventWait for 14ms
+		printf("oss: Oh no, a pagefault! Set up event wait for child here\n");
 		return;
 	}
-	if(msgData < 20) {
-		release(childPid, (msgData - RESOURCE_TABLE_SIZE), 1); //msgData will come back as the resource number + 10
+	else { //TODO send a message back
+		printf("oss should send a message back here\n");
+		
+		if(frame <= 0) { //If frame is negative, then it is a write
+			frameTable[frame].dirtyBit = 1;
+		}
+
 		return;
 	}
 	childTerminated(childPid);
@@ -372,23 +463,17 @@ void takeAction(pid_t childPid, int msgData) {
 void request(pid_t childPid, int resourceNumber) {
 	int entry = findTableIndex(childPid);
 	processTable[entry].requestVector[resourceNumber] += 1; //TODO change this to enqueue
-	fprintf(fptr, "MASTER: Child pid %d has requested an instance of resource %d\n", childPid, resourceNumber);
+	fprintf(fptr, "oss: Child pid %d has requested an instance of resource %d\n", childPid, resourceNumber);
 	grantResource(childPid, resourceNumber, entry);
 }
 
-int release(pid_t childPid, int resourceNumber, int output) {
-	int entry = findTableIndex(childPid);
-	if(processTable[entry].allocationVector[resourceNumber] > 0) {
-		processTable[entry].allocationVector[resourceNumber] -= 1;
-		if(output)
-			fprintf(fptr, "MASTER: Child pid %d has released an instance of resource %d\n", childPid, resourceNumber);
-		resourceTable[resourceNumber].availableInstances += 1;
-		sendMessage(childPid, 2, output);
-		return 1;
+//Releases held resources in the frameTable and TODO pageTable
+void release(pid_t childPid) {
+	for(int frameCount = 0; frameCount < FRAME_TABLE_SIZE; frameCount++) {
+		if(frameTable[frameCount].processHeld == childPid)
+			frameDefault(frameCount);
 	}
-	if(output)
-		fprintf(fptr, "MASTER: Child pid %d has attempted to release an instance of resource %d that it does not have\n", childPid, resourceNumber);
-	return 0;
+	fprintf(fptr, "oss: Child pid %d has released its resources.\n", childPid);
 }
 
 //Tries to grant the most recent request first and sends a message back to that child.
@@ -407,11 +492,11 @@ void grantResource(pid_t childPid, int resourceNumber, int processNumber) {
 
 		resourceTable[resourceNumber].availableInstances -= 1;
 		
-		fprintf(fptr, "MASTER: Requested instance of resource %d to child pid %d has been granted.\n", resourceNumber, childPid);
+		fprintf(fptr, "oss: Requested instance of resource %d to child pid %d has been granted.\n", resourceNumber, childPid);
 		sendMessage(childPid, 1, 1);
 	}
 	else {
-		fprintf(fptr, "MASTER: Requested instance of resource %d to child pid %d has been denied.\n", resourceNumber, childPid);
+		fprintf(fptr, "oss: Requested instance of resource %d to child pid %d has been denied.\n", resourceNumber, childPid);
 		sendMessage(childPid, 0, 1);
 		int entry = findTableIndex(childPid);
 		processTable[entry].blocked = resourceNumber + 1;
@@ -419,29 +504,28 @@ void grantResource(pid_t childPid, int resourceNumber, int processNumber) {
 	}
 }
 
-void sendMessage(pid_t childPid, int msg, int output) {
+void sendMessage(pid_t childPid, int msg) {
 	buf.intData = msg;
 	buf.mtype = childPid;
-	if(output)
-		fprintf(fptr, "MASTER: Sending message of %d to child pid %d\n", msg, childPid);
+	fprintf(fptr, "oss: Sending message of %d to child pid %d\n", msg, childPid);
 	if(msgsnd(msqid, &buf, sizeof(msgBuffer), 0) == -1) {
-			perror("msgsnd to child failed\n");
-			terminateProgram(6);
+		perror("msgsnd to child failed\n");
+		terminateProgram(6);
 	}
 }
 
 void checkTime(int *outputTimer, int *deadlockDetectionTimer) {
 	if(abs(simulatedClock[1] - *outputTimer) >= HALF_SECOND){
-			*outputTimer = simulatedClock[1];
-			*deadlockDetectionTimer += 1;
-			printf("\nOSS PID:%d SysClockS:%d SysClockNano:%d\n", getpid(), simulatedClock[0], simulatedClock[1]); 
-			outputProcessTable();
-			outputResourceTable();
+		*outputTimer = simulatedClock[1];
+		*deadlockDetectionTimer += 1;
+		printf("\nOSS PID:%d SysClockS:%d SysClockNano:%d\n", getpid(), simulatedClock[0], simulatedClock[1]); 
+		outputProcessTable();
+		outputResourceTable();
 	}
 	if(2 == *deadlockDetectionTimer) {
 		*deadlockDetectionTimer = 0;
 
-		//Terminate processes until deadlock is gone, in order of highest resource allocation. 
+		//TODO Terminate processes until deadlock is gone, in order of highest resource allocation. 
 		//Terminates processes using the most resources first
 		while(runDeadlockDetection()) {
 			deadlockTermination();
@@ -466,7 +550,7 @@ void deadlockTermination() {
 		currentResourcesUsed = 0;
 	}
 	pid_t workerToTerminate = processTable[heaviestProcess].pid;
-	fprintf(fptr, "MASTER: Killing child pid %d to try and correct deadlock.\n", workerToTerminate);
+	fprintf(fptr, "oss: Killing child pid %d to try and correct deadlock.\n", workerToTerminate);
 	int sleepQueueSize = sleepQueue->size;
 	for(int count = 0; count < sleepQueueSize; count++) {
 		int currentPid = dequeue(sleepQueue);
@@ -481,7 +565,7 @@ void deadlockTermination() {
 
 //Returns the entry number of the most resource-intensive process if deadlock is detected, returns 0 otherwise
 int runDeadlockDetection() {
-	fprintf(fptr, "MASTER: Running deadlock detection algorithm at time %d.%d\n", simulatedClock[0], simulatedClock[1]);
+	fprintf(fptr, "oss: Running deadlock detection algorithm at time %d.%d\n", simulatedClock[0], simulatedClock[1]);
 	int requestMatrix[processTableSize][RESOURCE_TABLE_SIZE];
 	int allocationMatrix[processTableSize][RESOURCE_TABLE_SIZE];
 	int availableVector[RESOURCE_TABLE_SIZE];
@@ -524,7 +608,7 @@ int runDeadlockDetection() {
 		}
 		//If possible, then "let the process play out" and release its resources
 		if(satisfyRequest) {
-			fprintf(fptr, "MASTER: Simulating the release of resources held by process %d\n", processCounter);//TODO delete
+			fprintf(fptr, "oss: Simulating the release of resources held by process %d\n", processCounter);//TODO delete
 			for(int resourceCounter = 0; resourceCounter < RESOURCE_TABLE_SIZE; resourceCounter++) {
 				availableVector[resourceCounter] += allocationMatrix[processCounter][resourceCounter];
 			}
@@ -541,13 +625,13 @@ int runDeadlockDetection() {
 	for(int count = 0; count < processTableSize; count++) {
 		if(finished[count] != 1) {
 			deadlockDetected = 1;
-			fprintf(fptr, "MASTER: Deadlock detected. Taking measures to correct.\n");
+			fprintf(fptr, "oss: Deadlock detected. Taking measures to correct.\n");
 			break;
 		}
 	}
 
 	if(!deadlockDetected) 
-		fprintf(fptr, "MASTER: No deadlock detected. Continuing.\n");
+		fprintf(fptr, "oss: No deadlock detected. Continuing.\n");
 
 	return deadlockDetected;
 }
@@ -566,10 +650,13 @@ void help() {
 	exit(1);
 }
 
-//sets all initial pid values to 0
+//sets all initial pid values to 0 and ensures processes won't be accidentally blocked
 void initializeProcessTable() {
-	for(int count = 0; count < processTableSize; count++) {
-		processTable[count].pid = 0;
+	for(int processCount = 0; processCount < processTableSize; processCount++) {
+		processTable[processCount].pid = 0;
+		processTable[processCount].eventWaitSeconds = 0;
+		processTable[processCount].eventWaitNano = 0;
+		processTable[processCount].blocked = 0;
 	}
 }
 
@@ -585,7 +672,9 @@ void initializePCB(pid_t pid) {
 	processTable[index].pid = pid;
 	processTable[index].startTimeSeconds = simulatedClock[0];
 	processTable[index].startTimeNano = simulatedClock[1];
-	processTable[index].blocked = 0;
+	for(int pageCount = 0; pageCount < PAGE_TABLE_SIZE; pageCount++) {
+		processTable[index].pageTable[pageCount] = initializePage();
+	}
 }
 
 void initializeResourceTable() {
@@ -596,12 +685,13 @@ void initializeResourceTable() {
 }
 
 //Checks to see if another child can be launched. If so, it launches a new child.
-void launchChild(int maxSimulChildren, int launchInterval, int *lastLaunchTime) {
+void launchChild(int maxSimulChildren, int launchInterval, int *lastLaunchTime, int *childCounter) {
 	//If the user defined time interval has not been reached, return.
 	if((simulatedClock[1] - *lastLaunchTime) < launchInterval)
 		return;
 
 	if(checkChildren(maxSimulChildren) && stillChildrenToLaunch()) {
+		childCounter += 1;
 		pid_t newChild;
 		newChild = fork();
 		if(newChild < 0) {
@@ -617,7 +707,7 @@ void launchChild(int maxSimulChildren, int launchInterval, int *lastLaunchTime) 
 		else {
 			initializePCB(newChild);
 			*lastLaunchTime = simulatedClock[1];
-			fprintf(fptr, "MASTER: Launching new child pid %d.\n", newChild);
+			fprintf(fptr, "oss: Launching new child pid %d.\n", newChild);
 			runningChildren++;
 		}
 	}
@@ -710,13 +800,14 @@ void outputProcessTable() {
 	}
 }
 
-void outputResourceTable() {
-	printf("%s\n%-15s %-15s %-15s\n", "Resource Table:", "Entry", "Available", "Total");
-	fprintf(fptr, "%s\n%-15s %-15s %-15s\n", "Resource Table:", "Entry", "Available", "Total");
-	for(int count = 0; count < RESOURCE_TABLE_SIZE; count++) {
-		printf("%-15d %-15d %-15d\n", count, resourceTable[count].availableInstances, resourceTable[count].totalInstances);
-		fprintf(fptr, "%-15d %-15d %-15d\n", count, resourceTable[count].availableInstances, resourceTable[count].totalInstances);
-	}
+//TODO
+void outputFrameTable() {
+	printf("\n***Pretend this is a frame table***\n");
+}
+
+//TODO
+void outputPageTable() {
+	printf("\n***Pretend this is a page table***\n");
 }
 
 void sendingOutput(int chldNum, int chldPid, int systemClock[2]) {
@@ -733,6 +824,27 @@ void receivingOutput(int chldNum, int chldPid, int systemClock[2], msgBuffer rcv
 	}
 }
 
+void frameDefault(int frameNumber) {
+	frameTable[frameNumber].dirtyBit = CLEAN;
+	frameTable[frameNumber].processHeld = -1;
+	frameTable[frameNumber].processHeld = -1;
+}
+
+struct Page initializePage() {
+	struct Page page;
+	for(int count = 0; count < PAGE_TABLE_SIZE; count++) {
+		page.memLocation = -1;
+		page.pendingEntry = 0;
+	}
+
+	return page;
+}
+
+void createFrameTable() {	
+	for(int count = 0; count < FRAME_TABLE_SIZE; count++) {
+		frameDefault(count);
+	}
+}
 
 //QUEUE CODE TAKEN FROM https://www.geeksforgeeks.org/introduction-and-array-implementation-of-queue/
 // function to create a queue

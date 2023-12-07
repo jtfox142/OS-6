@@ -8,13 +8,13 @@
 #include<time.h>
 
 #define PERMS 0644
-#define NUMBER_OF_RESOURCES 10
+#define NUMBER_OF_FRAMES 32
 #define REQUEST_CODE 10
 #define TERMINATION_CODE 21
 #define MILLISECOND_TIMER 250000000
-#define REQUEST 0
-#define RELEASE 1
-#define RESOURCE_INSTANCES 20
+#define READ 0
+#define WRITE 1
+#define RESOURCE_INSTANCES 1
 
 typedef struct msgbuffer {
 	long mtype;
@@ -23,8 +23,7 @@ typedef struct msgbuffer {
 } msgbuffer;
 
 struct resourceTracker {
-	int requests[NUMBER_OF_RESOURCES];
-	int allocations[NUMBER_OF_RESOURCES];
+	int allocations[NUMBER_OF_FRAMES];
 };
 
 int RNG(int max) {
@@ -34,8 +33,8 @@ int RNG(int max) {
 int decideAction() {
 	int choice = RNG(100);
 	if(choice < 90)
-		return REQUEST;
-	return RELEASE;
+		return READ;
+	return WRITE;
 }
 
 //Attempts to grab a random resource. If allocations/requests for that resource are maxed out, then it begins
