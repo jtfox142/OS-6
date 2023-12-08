@@ -120,7 +120,7 @@ void release(pid_t childPid);
 int runDeadlockDetection();
 
 //Page and Frame Functions
-void outputFrameTable();
+void outputFrameTable(struct Queue *fifoQueue);
 void outputPageTable();
 
 //Queue functions ORIGINALLY TAKEN FROM https://www.geeksforgeeks.org/introduction-and-array-implementation-of-queue/
@@ -137,7 +137,7 @@ int checkChildren(int maxSimulChildren);
 int stillChildrenToLaunch();
 int childrenInSystem();
 int findTableIndex(pid_t pid);
-void checkTime(int *outputTimer);
+void checkTime(int *outputTimer, struct Queue *fifoQueue);
 void takeAction(pid_t childPid, int msgData);
 void childTerminated(pid_t terminatedChild);
 void sendMessage(pid_t childPid, int msg);
@@ -284,7 +284,7 @@ int main(int argc, char** argv) {
 
 		//outputs the process table to a log file and the screen every half second
 		//and runs a deadlock detection algorithm every second
-		checkTime(outputTimer); //TODO output frame table and shit
+		checkTime(outputTimer, fifoQueue);
 	}
 
 	pid_t wpid;
@@ -300,7 +300,6 @@ int main(int argc, char** argv) {
 /*
 
 TODO
-	* Output frame table
 	* Cure soft deadlock
 	* Terminate if 100 processes have entered system
 
@@ -603,12 +602,12 @@ void sendMessage(pid_t childPid, int msg) {
 	}
 }
 
-void checkTime(int *outputTimer) {
+void checkTime(int *outputTimer, struct Queue *fifoQueue) {
 	if(abs(simulatedClock[1] - *outputTimer) >= HALF_SECOND){ //TODO FAULTY LOGIC
 		*outputTimer = simulatedClock[1];
 		printf("\nOSS PID:%d SysClockS:%d SysClockNano:%d\n", getpid(), simulatedClock[0], simulatedClock[1]); 
 		outputProcessTable();
-		outputFrameTable();
+		outputFrameTable(fifoQueue);
 	}
 }
 
@@ -773,14 +772,17 @@ void outputProcessTable() {
 	}
 }
 
-//TODO
-void outputFrameTable() {
-	printf("\n***Pretend this is a frame table***\n");
-}
-
-//TODO
-void outputPageTable() {
-	printf("\n***Pretend this is a page table***\n");
+void outputFrameTable(struct Queue *fifoQueue) {
+	printf("%s\n%-15s %-15s %15s %15s %15s %15s\n", "Frame Table:", "Frame Num", "Process", "Page", "Dirty Bit", "HeadOfFIFO");
+	fprintf(fptr, "%s\n%-15s %-15s %15s %15s %15s %15s\n", "Frame Table:", "Frame Num", "Process", "Page", "Dirty Bit", "HeadOfFIFO");
+	for(int i = 0; i < FRAME_TABLE_SIZE; i++) {
+		printf("%-15d %-15d %15d %15d", i, frameTable[i].processHeld, frameTable[i].pageHeld, frameTable[i].dirtyBit);
+		if(i == front(fifoQueue))
+			printf(" %-15d\n\n", 1);
+		fprintf(fptr, "%-15d %-15d %15d %15d", i, frameTable[i].processHeld, frameTable[i].pageHeld, frameTable[i].dirtyBit);
+		if(i == front(fifoQueue))
+			fprintf(fptr, " %-15d\n\n", 1);
+	}
 }
 
 void outputRequest(int chldNum, int chldPid, int address) {
