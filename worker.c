@@ -111,7 +111,7 @@ int main(int argc, char** argv) {
 		//terminate. If it has been alloted all requested resources, 
 		//it will terminate naturally. It might also be asked by
 		//OSS to terminate if it is deadlocked.
-		if((memAccesses % 1000) == 0) {
+		if(memAccesses > 0 && (memAccesses % 1000) == 0) {
 			terminate = checkForTermination();
 
 			if(terminate) {
@@ -145,6 +145,8 @@ int main(int argc, char** argv) {
 			printf("msgsnd to parent failed.\n");
 			exit(1);
 		}
+
+		memAccesses++;
 
 		//Get message back from parent
 		//printf("WORKER %d: Waiting on reply from master.\n", myPid);
