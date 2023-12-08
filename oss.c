@@ -48,6 +48,9 @@ struct PCB {
 	int blocked; //whether this process is able to operate in its present state
 	int eventWaitSeconds; //when does its events happen?
 	int eventWaitNano; //when does its events happen?
+	int memAccessSeconds;
+	int memAccessNano;
+	int pageFaults;
 	struct Page pageTable[PAGE_TABLE_SIZE]; //Each page holds an integer referencing the frame in which it is held
 };
 
@@ -273,6 +276,16 @@ int main(int argc, char** argv) {
 	return EXIT_SUCCESS;
 }
 
+/*
+
+TODO
+	* Output frame table
+	* Cure soft deadlock
+	* Terminate if 100 processes have entered system
+	* Display statistics
+
+*/
+
 // FUNCTION DEFINITIONS
 
 //Checks to see if it can wake up any blocked processes
@@ -477,12 +490,23 @@ void processRequest(pid_t childPid, int address) {
 	if(frame == -1) { //PAGE FAULT: set up eventWait for 14ms, add pendingEntry, enqueue blocked queue
 		printf("oss: Oh no, a pagefault! Set up event wait for child here\n");
 		fprintf(fptr, "oss: Address %d is not in a frame, pagefault.\n", address);
-		processTable[entry].eventWaitNano = MEM_REQUEST_INCREMENT;
+		processTable[entry].eventWaitSeconds = simulatedClock[0];
+		processTable[entry].eventWaitNano = simulatedClock[1] + MEM_REQUEST_INCREMENT;
+		if(processTable[entry].eventWaitNano > ONE_SECOND) {
+			processTable[entry].eventWaitNano - ONE_SECOND;
+			processTable[entry].eventWaitSeconds += 1;
+		}
 		processTable[entry].pageTable[page].pendingEntry = address;
+		processTable[entry].pageFaults += 1;
 		enqueue(blockedQueue, childPid);
 	}
 	else {
 		incrementClock(100);
+		processTable[entry].memAccessNano += 100;
+		if(processTable[entry].memAccessNano >= ONE_SECOND) {
+			processTable[entry].memAccessNano -= ONE_SECOND;
+			processTable[entry].memAccessSeconds += 1;
+		}
 		
 		if(address <= 0) { //If address is negative, then it is a write
 			fprintf(fptr, "oss: Address %d in frame %d, writing data to frame at time %d:%d\n", address, frame, simulatedClock[0], simulatedClock[1]);
@@ -571,6 +595,9 @@ void initializePCB(pid_t pid) {
 	processTable[index].pid = pid;
 	processTable[index].startTimeSeconds = simulatedClock[0];
 	processTable[index].startTimeNano = simulatedClock[1];
+	processTable[index].memAccessSeconds = 0;
+	processTable[index].memAccessNano = 0;
+	processTable[index].pageFaults = 0;
 	for(int pageCount = 0; pageCount < PAGE_TABLE_SIZE; pageCount++) {
 		processTable[index].pageTable[pageCount] = initializePage();
 	}
