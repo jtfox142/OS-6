@@ -161,6 +161,7 @@ void addToFrame(int frameNumber, pid_t process, int pageNumber);
 int noEmptyFrame(struct Queue *fifoQueue);
 void fifoReplacementAlgo(pid_t incomingProcess, struct Queue *fifoQueue);
 void checkEventWait(struct Queue *fifoQueue);
+void insertAlgo(pid_t process, int address, int page, struct Queue *fifoQueue);
 
 int main(int argc, char** argv) {
 	//signals to terminate program properly if user hits ctrl+c or 5 seconds pass
@@ -484,7 +485,7 @@ void checkForMessages(struct Queue *fifoQueue) {
 	}
 	else if(rcvbuf.childPid != 0) {
 		outputRequest(findTableIndex(rcvbuf.childPid), rcvbuf.childPid, rcvbuf.intData);
-		processRequest(rcvbuf.childPid, rcvbuf.intData);
+		processRequest(rcvbuf.childPid, rcvbuf.intData, fifoQueue);
 	}
 }
 
@@ -555,13 +556,6 @@ void insertAlgo(pid_t process, int address, int page, struct Queue *fifoQueue) {
 	addToPageTable(process, page, frame);
 
 	enqueue(fifoQueue, process);
-}
-
-int isInFrameTable(pid_t process, int page) {
-	for(int frameCount = 0; frameCount < FRAME_TABLE_SIZE; frameCount++) {
-		if((frameTable[frameCount].processHeld == process && frameTable[frameCount].pageHeld == page) || frameTable[frameCount].processHeld == -1)
-			return frameCount;
-	}
 }
 
 //If the process + page are in a frame or there is an empty frame, no page fault
