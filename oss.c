@@ -300,7 +300,6 @@ int main(int argc, char** argv) {
 /*
 
 TODO
-	* Cure soft deadlock
 	* Terminate if 100 processes have entered system
 
 */
