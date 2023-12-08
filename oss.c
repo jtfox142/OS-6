@@ -568,7 +568,7 @@ void insertAlgo(pid_t process, int address, int page, struct Queue *fifoQueue) {
 	//Add the frame location to the page table of the incoming process and remove the pending marker
 	addToPageTable(process, page, frame);
 
-	enqueue(fifoQueue, process);
+	enqueue(fifoQueue, frame);
 }
 
 //If the process + page are in a frame or there is an empty frame, no page fault
