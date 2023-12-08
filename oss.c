@@ -628,6 +628,7 @@ void help() {
 //sets all initial pid values to 0 and ensures processes won't be accidentally blocked
 void initializeProcessTable() {
 	for(int processCount = 0; processCount < processTableSize; processCount++) {
+		processTable[processCount].occupied = 0;
 		processTable[processCount].pid = 0;
 		processTable[processCount].eventWaitSeconds = 0;
 		processTable[processCount].eventWaitNano = 0;
@@ -817,7 +818,7 @@ void outputStatistics(pid_t terminatedChild) {
 void frameDefault(int frameNumber) {
 	frameTable[frameNumber].dirtyBit = CLEAN;
 	frameTable[frameNumber].processHeld = -1;
-	frameTable[frameNumber].processHeld = -1;
+	frameTable[frameNumber].pageHeld = -1;
 }
 
 struct Page initializePage() {
