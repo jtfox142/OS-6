@@ -162,6 +162,7 @@ int noEmptyFrame(struct Queue *fifoQueue);
 void fifoReplacementAlgo(pid_t incomingProcess, struct Queue *fifoQueue);
 void checkEventWait(struct Queue *fifoQueue);
 void insertAlgo(pid_t process, int address, int page, struct Queue *fifoQueue);
+void cureSoftDeadlock(int simul);
 
 int main(int argc, char** argv) {
 	//signals to terminate program properly if user hits ctrl+c or 5 seconds pass
@@ -613,7 +614,7 @@ void checkTime(int *outputTimer, struct Queue *fifoQueue, int simul) {
 	}
 }
 
-void cureSoftDeadlock(simul) {
+void cureSoftDeadlock(int simul) {
 	if(blockedQueue->size == simul)
 		incrementClock(MEM_REQUEST_INCREMENT);
 }
