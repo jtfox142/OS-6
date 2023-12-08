@@ -452,7 +452,7 @@ void startInitialProcesses(int initialChildren, int *childCounter) {
        		}
 		else {
 			initializePCB(newChild);
-			printf("oss: Launching Child PID %d\n", newChild);
+			fprintf(fptr, "oss: Launching Child PID %d\n", newChild);
 			runningChildren++;
 		}
 	}
