@@ -348,11 +348,13 @@ void fifoReplacementAlgo(pid_t incomingProcess, struct Queue *fifoQueue) {
 		//Remove the frame location from the outgoing process's page table
 		removeFromPageTable(outgoingProcess, frameToUse);
 		fprintf(fptr, "Clearing frame %d and swapping in P%d page %d\n", frameToUse, findTableIndex(incomingProcess), incomingPage);
+		printf("Clearing frame %d and swapping in P%d page %d\n", frameToUse, findTableIndex(incomingProcess), incomingPage);
 	}
 	else {
 		//Otherwise, use the first empty frame you can find
 		frameToUse = findEmptyFrame();
 		fprintf(fptr, "Putting P%d page %d into empty frame %d\n", findTableIndex(incomingProcess), incomingPage, frameToUse);
+		printf("Putting P%d page %d into empty frame %d\n", findTableIndex(incomingProcess), incomingPage, frameToUse);
 	}
 	//Should never happen, but just in case
 	if(frameToUse < 0 || frameToUse > 255) {
@@ -439,6 +441,7 @@ void startInitialProcesses(int initialChildren, int *childCounter) {
 		else {
 			initializePCB(newChild);
 			fprintf(fptr, "oss: Launching Child PID %d\n", newChild);
+			printf("oss: Launching Child PID %d\n", newChild);
 			runningChildren++;
 		}
 	}
@@ -465,6 +468,7 @@ void childTerminated(pid_t terminatedChild) {
 	runningChildren--;
 
 	fprintf(fptr, "oss: Child pid %d has terminated and its resources have been released.\n", terminatedChild);
+	printf("oss: Child pid %d has terminated and its resources have been released.\n", terminatedChild);
 	outputStatistics(terminatedChild);
 }
 
@@ -482,6 +486,7 @@ void checkForMessages(struct Queue *fifoQueue) {
 	}
 	else if(rcvbuf.intData == 500) {
 		fprintf(fptr, "oss: P%d, PID %d, is planning to terminate.\n", findTableIndex(rcvbuf.childPid), rcvbuf.childPid);
+		printf("oss: P%d, PID %d, is planning to terminate.\n", findTableIndex(rcvbuf.childPid), rcvbuf.childPid);
 	}
 	else if(rcvbuf.childPid != 0) {
 		outputRequest(findTableIndex(rcvbuf.childPid), rcvbuf.childPid, rcvbuf.intData);
@@ -496,8 +501,8 @@ void processRequest(pid_t childPid, int address, struct Queue *fifoQueue) {
 	outputRequest(entry, childPid, address);
 
 	if(frame == -1) { //PAGE FAULT: set up eventWait for 14ms, add pendingEntry, enqueue blocked queue
-		printf("oss: Oh no, a pagefault! Set up event wait for child here\n");
 		fprintf(fptr, "oss: Address %d is not in a frame, pagefault.\n", address);
+		printf("oss: Address %d is not in a frame, pagefault.\n", address);
 		processTable[entry].eventWaitSeconds = simulatedClock[0];
 		processTable[entry].eventWaitNano = simulatedClock[1] + MEM_REQUEST_INCREMENT;
 		if(processTable[entry].eventWaitNano > ONE_SECOND) {
@@ -518,21 +523,26 @@ void processRequest(pid_t childPid, int address, struct Queue *fifoQueue) {
 		
 		if(address <= 0) { //If address is negative, then it is a write
 			fprintf(fptr, "oss: Address %d in frame %d, writing data to frame at time %d:%d\n", address, frame, simulatedClock[0], simulatedClock[1]);
+			printf("oss: Address %d in frame %d, writing data to frame at time %d:%d\n", address, frame, simulatedClock[0], simulatedClock[1]);
 			if(frameTable[frame].dirtyBit == 0) {
 				frameTable[frame].dirtyBit = 1;
 				fprintf(fptr, "Dirty bit of frame %d set\n", frame);
+				printf("Dirty bit of frame %d set\n", frame);
 			}
 		}
 		else {
 			fprintf(fptr, "oss: Address %d in frame %d, giving data to P%d at time %d:%d\n", address, frame, entry, simulatedClock[0], simulatedClock[1]);
+			printf("oss: Address %d in frame %d, giving data to P%d at time %d:%d\n", address, frame, entry, simulatedClock[0], simulatedClock[1]);
 		}
 
 		sendMessage(childPid, 1);
 	}
 	else { //If the page is not in the frame table but there is an empty frame
 		fprintf(fptr, "oss: Adding address %d to an empty frame.\n", address);
+		printf("oss: Adding address %d to an empty frame.\n", address);
 		insertAlgo(childPid, address, page, fifoQueue);
 		incrementClock(MEM_REQUEST_INCREMENT);
+		sendMessage(childPid, 1);
 	}
 }
 
@@ -545,11 +555,14 @@ void insertAlgo(pid_t process, int address, int page, struct Queue *fifoQueue) {
 	int entry = findTableIndex(process);
 	if(address  < 0) { //If address is negative, then it is a write
 		fprintf(fptr, "Indicating to P%d that a write has happened to address %d\n", entry, address);
+		printf("Indicating to P%d that a write has happened to address %d\n", entry, address);
 		frameTable[frame].dirtyBit = 1;
 		fprintf(fptr, "Dirty bit of frame %d set\n", frame);
+		printf("Dirty bit of frame %d set\n", frame);
 	}
 	else {
 		fprintf(fptr, "Giving data from address %d to P%d\n", address, entry);
+		printf("Giving data from address %d to P%d\n", address, entry);
 	}
 
 	//Add the frame location to the page table of the incoming process and remove the pending marker
@@ -577,12 +590,12 @@ void release(pid_t childPid) {
 			frameDefault(frameCount);
 	}
 	fprintf(fptr, "oss: Child pid %d has released its resources.\n", childPid);
+	printf("oss: Child pid %d has released its resources.\n", childPid);
 }
 
 void sendMessage(pid_t childPid, int msg) {
 	buf.intData = msg;
 	buf.mtype = childPid;
-	fprintf(fptr, "oss: Sending message of %d to child pid %d\n", msg, childPid);
 	if(msgsnd(msqid, &buf, sizeof(msgBuffer), 0) == -1) {
 		perror("msgsnd to child failed\n");
 		terminateProgram(6);
@@ -666,6 +679,7 @@ void launchChild(int maxSimulChildren, int launchInterval, int *lastLaunchTime, 
 			initializePCB(newChild);
 			*lastLaunchTime = simulatedClock[1];
 			fprintf(fptr, "oss: Launching new child pid %d.\n", newChild);
+			printf("oss: Launching new child pid %d.\n", newChild);
 			runningChildren++;
 		}
 	}
@@ -772,9 +786,11 @@ void outputRequest(int chldNum, int chldPid, int address) {
 	//If address is negative then the process is writing
 	if(address < 0) {
 		fprintf(fptr, "oss: P%d, PID %d, requesting write of address %d at time %d:%d\n", chldNum, chldPid, abs(address), simulatedClock[0], simulatedClock[1]);
+		printf("oss: P%d, PID %d, requesting write of address %d at time %d:%d\n", chldNum, chldPid, abs(address), simulatedClock[0], simulatedClock[1]);
 	}
 	else {
 		fprintf(fptr, "oss: P%d, PID %d, requesting read of address %d at time %d:%d\n", chldNum, chldPid, address, simulatedClock[0], simulatedClock[1]);
+		printf("oss: P%d, PID %d, requesting read of address %d at time %d:%d\n", chldNum, chldPid, address, simulatedClock[0], simulatedClock[1]);
 	}
 }
 
@@ -788,6 +804,7 @@ void outputStatistics(pid_t terminatedChild) {
 	int pageFaults = processTable[entry].pageFaults;
 
 	fprintf(fptr, "oss: P%d, PID %d, terminated with a memory access time of %d:%d and %d page faults.\n", entry, terminatedChild, memAccessTime[0], memAccessTime[1], pageFaults);
+	printf("oss: P%d, PID %d, terminated with a memory access time of %d:%d and %d page faults.\n", entry, terminatedChild, memAccessTime[0], memAccessTime[1], pageFaults);
 }
 
 void frameDefault(int frameNumber) {
