@@ -773,8 +773,8 @@ void outputProcessTable() {
 }
 
 void outputFrameTable(struct Queue *fifoQueue) {
-	printf("%s\n%-15s %-15s %15s %15s %15s %15s\n", "Frame Table:", "Frame Num", "Process", "Page", "Dirty Bit", "HeadOfFIFO");
-	fprintf(fptr, "%s\n%-15s %-15s %15s %15s %15s %15s\n", "Frame Table:", "Frame Num", "Process", "Page", "Dirty Bit", "HeadOfFIFO");
+	printf("%s\n%-15s %-15s %15s %15s %15s\n", "Frame Table:", "Frame Num", "Process", "Page", "Dirty Bit", "HeadOfFIFO");
+	fprintf(fptr, "%s\n%-15s %-15s %15s %15s %15s\n", "Frame Table:", "Frame Num", "Process", "Page", "Dirty Bit", "HeadOfFIFO");
 	for(int i = 0; i < FRAME_TABLE_SIZE; i++) {
 		printf("%-15d %-15d %15d %15d", i, frameTable[i].processHeld, frameTable[i].pageHeld, frameTable[i].dirtyBit);
 		if(i == front(fifoQueue))
