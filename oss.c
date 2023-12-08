@@ -152,7 +152,7 @@ void outputRequest(int chldNum, int chldPid, int address);
 void outputPageTable();
 void outputFrameTable();
 int pageFault(pid_t process, int page);
-void processRequest(pid_t childPid, int address);
+void processRequest(pid_t childPid, int address, struct Queue *fifoQueue);
 void removeFromPageTable(pid_t process, int frameNumber);
 void addToPageTable(pid_t process, int pageNumber, int frameNumber);
 int findPendingPage(pid_t process);
@@ -359,24 +359,9 @@ void fifoReplacementAlgo(pid_t incomingProcess, struct Queue *fifoQueue) {
 		exit(1);
 	}
 
-	//Add the new page and process to the frame, set the dirty bit to zero
-	addToFrame(frameToUse, incomingProcess, incomingPage); 
-
 	int entry = findTableIndex(incomingProcess);
 	int address = processTable[entry].pageTable[incomingPage].pendingEntry;
-	if(address  < 0) { //If address is negative, then it is a write
-		fprintf(fptr, "Indicating to P%d that a write has happened to address %d\n", entry, address);
-		frameTable[frameToUse].dirtyBit = 1;
-		fprintf(fptr, "Dirty bit of frame %d set\n", frameToUse);
-	}
-	else {
-		fprintf(fptr, "Giving data from address %d to P%d\n", address, entry);
-	}
-
-	//Add the frame location to the page table of the incoming process and remove the pending marker
-	addToPageTable(incomingProcess, incomingPage, frameToUse);
-
-	enqueue(fifoQueue, incomingProcess);
+	insertAlgo(incomingProcess, address, incomingPage, fifoQueue);
 }
 
 //If there are no available frames, return 1
@@ -503,7 +488,7 @@ void checkForMessages(struct Queue *fifoQueue) {
 	}
 }
 
-void processRequest(pid_t childPid, int address) {
+void processRequest(pid_t childPid, int address, struct Queue *fifoQueue) {
 	int page = abs(address) / KB;
 	int frame = pageFault(childPid, page);
 	int entry = findTableIndex(childPid);
@@ -522,7 +507,7 @@ void processRequest(pid_t childPid, int address) {
 		processTable[entry].pageFaults += 1;
 		enqueue(blockedQueue, childPid);
 	}
-	else {
+	else if(frame < 256){ //If the page is in the frame table
 		incrementClock(100);
 		processTable[entry].memAccessNano += 100;
 		if(processTable[entry].memAccessNano >= ONE_SECOND) {
@@ -543,12 +528,50 @@ void processRequest(pid_t childPid, int address) {
 
 		sendMessage(childPid, 1);
 	}
+	else { //If the page is not in the frame table but there is an empty frame
+		fprintf(fptr, "oss: Adding address %d to an empty frame.\n", address);
+		insertAlgo(childPid, address, page, fifoQueue);
+		incrementClock(MEM_REQUEST_INCREMENT);
+	}
 }
 
+void insertAlgo(pid_t process, int address, int page, struct Queue *fifoQueue) {
+	int frame = findEmptyFrame();
+
+	//Add the new page and process to the frame, set the dirty bit to zero
+	addToFrame(frame, process, page); 
+
+	int entry = findTableIndex(process);
+	if(address  < 0) { //If address is negative, then it is a write
+		fprintf(fptr, "Indicating to P%d that a write has happened to address %d\n", entry, address);
+		frameTable[frame].dirtyBit = 1;
+		fprintf(fptr, "Dirty bit of frame %d set\n", frame);
+	}
+	else {
+		fprintf(fptr, "Giving data from address %d to P%d\n", address, entry);
+	}
+
+	//Add the frame location to the page table of the incoming process and remove the pending marker
+	addToPageTable(process, page, frame);
+
+	enqueue(fifoQueue, process);
+}
+
+int isInFrameTable(pid_t process, int page) {
+	for(int frameCount = 0; frameCount < FRAME_TABLE_SIZE; frameCount++) {
+		if((frameTable[frameCount].processHeld == process && frameTable[frameCount].pageHeld == page) || frameTable[frameCount].processHeld == -1)
+			return frameCount;
+	}
+}
+
+//If the process + page are in a frame or there is an empty frame, no page fault
+//-1 == page fault
 int pageFault(pid_t process, int page) {
 	for(int frameCount = 0; frameCount < FRAME_TABLE_SIZE; frameCount++) {
 		if(frameTable[frameCount].processHeld == process && frameTable[frameCount].pageHeld == page)
 			return frameCount;
+		if(frameTable[frameCount].processHeld == -1)
+			return 257;
 	}
 	return -1;
 }
