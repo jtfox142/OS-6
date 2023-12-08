@@ -143,6 +143,25 @@ void childTerminated(pid_t terminatedChild);
 void sendMessage(pid_t childPid, int msg);
 void deadlockTermination();
 
+//OS-6 Functions
+void createFrameTable();
+struct Page initializePage();
+void frameDefault(int frameNumber);
+void outputStatistics(pid_t terminatedChild);
+void outputRequest(int chldNum, int chldPid, int address);
+void outputPageTable();
+void outputFrameTable();
+int pageFault(pid_t process, int page);
+void processRequest(pid_t childPid, int address);
+void removeFromPageTable(pid_t process, int frameNumber);
+void addToPageTable(pid_t process, int pageNumber, int frameNumber);
+int findPendingPage(pid_t process);
+int findEmptyFrame();
+void addToFrame(int frameNumber, pid_t process, int pageNumber);
+int noEmptyFrame(struct Queue *fifoQueue);
+void fifoReplacementAlgo(pid_t incomingProcess, struct Queue *fifoQueue);
+void checkEventWait(struct Queue *fifoQueue);
+
 int main(int argc, char** argv) {
 	//signals to terminate program properly if user hits ctrl+c or 5 seconds pass
 	alarm(5);
