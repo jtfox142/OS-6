@@ -168,6 +168,7 @@ int main(int argc, char** argv) {
 	alarm(5);
 	signal(SIGALRM, sighandler);
 	signal(SIGINT, sighandler);	
+	signal(SIGSEGV, sighandler);
 
 	//allocate shared memory
 	sh_key = ftok("./oss.c", 0);
@@ -501,7 +502,7 @@ void processRequest(pid_t childPid, int address, struct Queue *fifoQueue) {
 	outputRequest(entry, childPid, address);
 
 	if(frame == -1) { //PAGE FAULT: set up eventWait for 14ms, add pendingEntry, enqueue blocked queue
-		fprintf(fptr, "oss: Address %d is not in a frame, pagefault.\n", address);
+		fprintf(fptr, "oss: Address %d is not in a frame, pagefault.\n", abs(address));
 		printf("oss: Address %d is not in a frame, pagefault.\n", address);
 		processTable[entry].eventWaitSeconds = simulatedClock[0];
 		processTable[entry].eventWaitNano = simulatedClock[1] + MEM_REQUEST_INCREMENT;
@@ -538,8 +539,8 @@ void processRequest(pid_t childPid, int address, struct Queue *fifoQueue) {
 		sendMessage(childPid, 1);
 	}
 	else { //If the page is not in the frame table but there is an empty frame
-		fprintf(fptr, "oss: Adding address %d to an empty frame.\n", address);
-		printf("oss: Adding address %d to an empty frame.\n", address);
+		fprintf(fptr, "oss: Adding P%d address %d to an empty frame.\n", entry, address);
+		printf("oss: Adding P%d address %d to an empty frame.\n", entry, address);
 		insertAlgo(childPid, address, page, fifoQueue);
 		incrementClock(MEM_REQUEST_INCREMENT);
 		sendMessage(childPid, 1);
@@ -603,7 +604,7 @@ void sendMessage(pid_t childPid, int msg) {
 }
 
 void checkTime(int *outputTimer) {
-	if(abs(simulatedClock[1] - *outputTimer) >= HALF_SECOND){
+	if(abs(simulatedClock[1] - *outputTimer) >= HALF_SECOND){ //TODO FAULTY LOGIC
 		*outputTimer = simulatedClock[1];
 		printf("\nOSS PID:%d SysClockS:%d SysClockNano:%d\n", getpid(), simulatedClock[0], simulatedClock[1]); 
 		outputProcessTable();
