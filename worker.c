@@ -43,7 +43,7 @@ int chooseAddress() {
 
 //Returns 1 if process should terminate
 int checkForTermination() {
-	int randNum = rng(100);
+	int randNum = RNG(100);
 	if(randNum < 50) {
 		return 1;
 	}
