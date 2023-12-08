@@ -137,7 +137,7 @@ int checkChildren(int maxSimulChildren);
 int stillChildrenToLaunch();
 int childrenInSystem();
 int findTableIndex(pid_t pid);
-void checkTime(int *outputTimer, struct Queue *fifoQueue);
+void checkTime(int *outputTimer, struct Queue *fifoQueue, int simul);
 void takeAction(pid_t childPid, int msgData);
 void childTerminated(pid_t terminatedChild);
 void sendMessage(pid_t childPid, int msg);
@@ -284,7 +284,7 @@ int main(int argc, char** argv) {
 
 		//outputs the process table to a log file and the screen every half second
 		//and runs a deadlock detection algorithm every second
-		checkTime(outputTimer, fifoQueue);
+		checkTime(outputTimer, fifoQueue, simul);
 	}
 
 	pid_t wpid;
@@ -503,6 +503,8 @@ void processRequest(pid_t childPid, int address, struct Queue *fifoQueue) {
 	if(frame == -1) { //PAGE FAULT: set up eventWait for 14ms, add pendingEntry, enqueue blocked queue
 		fprintf(fptr, "oss: Address %d is not in a frame, pagefault.\n", abs(address));
 		printf("oss: Address %d is not in a frame, pagefault.\n", abs(address));
+
+		processTable[entry].blocked = 1;
 		processTable[entry].eventWaitSeconds = simulatedClock[0];
 		processTable[entry].eventWaitNano = simulatedClock[1] + MEM_REQUEST_INCREMENT;
 		if(processTable[entry].eventWaitNano > ONE_SECOND) {
@@ -602,13 +604,19 @@ void sendMessage(pid_t childPid, int msg) {
 	}
 }
 
-void checkTime(int *outputTimer, struct Queue *fifoQueue) {
-	if(abs(simulatedClock[1] - *outputTimer) >= HALF_SECOND){ //TODO FAULTY LOGIC
+void checkTime(int *outputTimer, struct Queue *fifoQueue, int simul) {
+	if(abs(simulatedClock[1] - *outputTimer) >= HALF_SECOND){ //TODO MAYBE FAULTY LOGIC
 		*outputTimer = simulatedClock[1];
 		printf("\nOSS PID:%d SysClockS:%d SysClockNano:%d\n", getpid(), simulatedClock[0], simulatedClock[1]); 
 		outputProcessTable();
 		outputFrameTable(fifoQueue);
+		cureSoftDeadlock(simul);
 	}
+}
+
+void cureSoftDeadlock(simul) {
+	if(blockedQueue->size == simul)
+		incrementClock(MEM_REQUEST_INCREMENT);
 }
 
 void help() {
