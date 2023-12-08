@@ -503,7 +503,7 @@ void processRequest(pid_t childPid, int address, struct Queue *fifoQueue) {
 
 	if(frame == -1) { //PAGE FAULT: set up eventWait for 14ms, add pendingEntry, enqueue blocked queue
 		fprintf(fptr, "oss: Address %d is not in a frame, pagefault.\n", abs(address));
-		printf("oss: Address %d is not in a frame, pagefault.\n", address);
+		printf("oss: Address %d is not in a frame, pagefault.\n", abs(address));
 		processTable[entry].eventWaitSeconds = simulatedClock[0];
 		processTable[entry].eventWaitNano = simulatedClock[1] + MEM_REQUEST_INCREMENT;
 		if(processTable[entry].eventWaitNano > ONE_SECOND) {
@@ -523,8 +523,8 @@ void processRequest(pid_t childPid, int address, struct Queue *fifoQueue) {
 		}
 		
 		if(address <= 0) { //If address is negative, then it is a write
-			fprintf(fptr, "oss: Address %d in frame %d, writing data to frame at time %d:%d\n", address, frame, simulatedClock[0], simulatedClock[1]);
-			printf("oss: Address %d in frame %d, writing data to frame at time %d:%d\n", address, frame, simulatedClock[0], simulatedClock[1]);
+			fprintf(fptr, "oss: Address %d in frame %d, writing data to frame at time %d:%d\n", abs(address), frame, simulatedClock[0], simulatedClock[1]);
+			printf("oss: Address %d in frame %d, writing data to frame at time %d:%d\n", abs(address), frame, simulatedClock[0], simulatedClock[1]);
 			if(frameTable[frame].dirtyBit == 0) {
 				frameTable[frame].dirtyBit = 1;
 				fprintf(fptr, "Dirty bit of frame %d set\n", frame);
@@ -532,15 +532,15 @@ void processRequest(pid_t childPid, int address, struct Queue *fifoQueue) {
 			}
 		}
 		else {
-			fprintf(fptr, "oss: Address %d in frame %d, giving data to P%d at time %d:%d\n", address, frame, entry, simulatedClock[0], simulatedClock[1]);
-			printf("oss: Address %d in frame %d, giving data to P%d at time %d:%d\n", address, frame, entry, simulatedClock[0], simulatedClock[1]);
+			fprintf(fptr, "oss: Address %d in frame %d, giving data to P%d at time %d:%d\n", abs(address), frame, entry, simulatedClock[0], simulatedClock[1]);
+			printf("oss: Address %d in frame %d, giving data to P%d at time %d:%d\n", abs(address), frame, entry, simulatedClock[0], simulatedClock[1]);
 		}
 
 		sendMessage(childPid, 1);
 	}
 	else { //If the page is not in the frame table but there is an empty frame
-		fprintf(fptr, "oss: Adding P%d address %d to an empty frame.\n", entry, address);
-		printf("oss: Adding P%d address %d to an empty frame.\n", entry, address);
+		fprintf(fptr, "oss: Adding P%d address %d to an empty frame.\n", entry, abs(address));
+		printf("oss: Adding P%d address %d to an empty frame.\n", entry, abs(address));
 		insertAlgo(childPid, address, page, fifoQueue);
 		incrementClock(MEM_REQUEST_INCREMENT);
 		sendMessage(childPid, 1);
@@ -555,15 +555,15 @@ void insertAlgo(pid_t process, int address, int page, struct Queue *fifoQueue) {
 
 	int entry = findTableIndex(process);
 	if(address  < 0) { //If address is negative, then it is a write
-		fprintf(fptr, "Indicating to P%d that a write has happened to address %d\n", entry, address);
-		printf("Indicating to P%d that a write has happened to address %d\n", entry, address);
+		fprintf(fptr, "Indicating to P%d that a write has happened to address %d\n", entry, abs(address));
+		printf("Indicating to P%d that a write has happened to address %d\n", entry, abs(address));
 		frameTable[frame].dirtyBit = 1;
 		fprintf(fptr, "Dirty bit of frame %d set\n", frame);
 		printf("Dirty bit of frame %d set\n", frame);
 	}
 	else {
-		fprintf(fptr, "Giving data from address %d to P%d\n", address, entry);
-		printf("Giving data from address %d to P%d\n", address, entry);
+		fprintf(fptr, "Giving data from address %d to P%d\n", abs(address), entry);
+		printf("Giving data from address %d to P%d\n", abs(address), entry);
 	}
 
 	//Add the frame location to the page table of the incoming process and remove the pending marker
