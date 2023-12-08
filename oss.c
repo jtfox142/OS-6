@@ -770,7 +770,7 @@ void outputStatistics(pid_t terminatedChild) {
 
 	int pageFaults = processTable[entry].pageFaults;
 
-	fprintf(fptr, "P%d, PID %d, terminated with a memory access time of %d:%d and %d page faults.\n", entry, terminatedChild, memAccessTime[0], memAccessTime[1], pageFaults);
+	fprintf(fptr, "oss: P%d, PID %d, terminated with a memory access time of %d:%d and %d page faults.\n", entry, terminatedChild, memAccessTime[0], memAccessTime[1], pageFaults);
 }
 
 void frameDefault(int frameNumber) {
