@@ -351,7 +351,7 @@ void fifoReplacementAlgo(pid_t incomingProcess, struct Queue *fifoQueue) {
 	else {
 		//Otherwise, use the first empty frame you can find
 		frameToUse = findEmptyFrame();
-		fprintf("Putting P%d page %d into empty frame %d", findTableIndex(incomingProcess), incomingPage, frameToUse);
+		fprintf(fptr, "Putting P%d page %d into empty frame %d\n", findTableIndex(incomingProcess), incomingPage, frameToUse);
 	}
 	//Should never happen, but just in case
 	if(frameToUse < 0 || frameToUse > 255) {
@@ -365,9 +365,9 @@ void fifoReplacementAlgo(pid_t incomingProcess, struct Queue *fifoQueue) {
 	int entry = findTableIndex(incomingProcess);
 	int address = processTable[entry].pageTable[incomingPage].pendingEntry;
 	if(address  < 0) { //If address is negative, then it is a write
-		fprintf("Indicating to P%d that a write has happened to address %d\n", entry, address);
+		fprintf(fptr, "Indicating to P%d that a write has happened to address %d\n", entry, address);
 		frameTable[frameToUse].dirtyBit = 1;
-		fprintf(fptr, "Dirty bit of frame %d set\n");
+		fprintf(fptr, "Dirty bit of frame %d set\n", frameToUse);
 	}
 	else {
 		fprintf(fptr, "Giving data from address %d to P%d\n", address, entry);
@@ -534,7 +534,7 @@ void processRequest(pid_t childPid, int address) {
 			fprintf(fptr, "oss: Address %d in frame %d, writing data to frame at time %d:%d\n", address, frame, simulatedClock[0], simulatedClock[1]);
 			if(frameTable[frame].dirtyBit == 0) {
 				frameTable[frame].dirtyBit = 1;
-				fprintf(fptr, "Dirty bit of frame %d set\n");
+				fprintf(fptr, "Dirty bit of frame %d set\n", frame);
 			}
 		}
 		else {
@@ -770,7 +770,7 @@ void outputStatistics(pid_t terminatedChild) {
 
 	int pageFaults = processTable[entry].pageFaults;
 
-	fprintf("P%d, PID %d, terminated with a memory access time of %d:%d and %d page faults.\n", entry, terminatedChild, memAccessTime[0], memAccessTime[1], pageFaults);
+	fprintf(fptr, "P%d, PID %d, terminated with a memory access time of %d:%d and %d page faults.\n", entry, terminatedChild, memAccessTime[0], memAccessTime[1], pageFaults);
 }
 
 void frameDefault(int frameNumber) {
