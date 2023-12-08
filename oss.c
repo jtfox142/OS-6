@@ -263,7 +263,7 @@ int main(int argc, char** argv) {
 
 		//outputs the process table to a log file and the screen every half second
 		//and runs a deadlock detection algorithm every second
-		checkTime(outputTimer); //TODO
+		checkTime(outputTimer); //TODO output frame table and shit
 	}
 
 	pid_t wpid;
@@ -282,7 +282,6 @@ TODO
 	* Output frame table
 	* Cure soft deadlock
 	* Terminate if 100 processes have entered system
-	* Display statistics
 
 */
 
@@ -461,6 +460,7 @@ void childTerminated(pid_t terminatedChild) {
 	runningChildren--;
 
 	fprintf(fptr, "oss: Child pid %d has terminated and its resources have been released.\n", terminatedChild);
+	outputStatistics(terminatedChild);
 }
 
 void checkForMessages(struct Queue *fifoQueue) {
@@ -474,6 +474,9 @@ void checkForMessages(struct Queue *fifoQueue) {
 				perror("msgrcv");
 				terminateProgram(6);
 			}
+	}
+	else if(rcvbuf.intData == 500) {
+		fprintf(fptr, "oss: P%d, PID %d, is planning to terminate.\n", findTableIndex(rcvbuf.childPid), rcvbuf.childPid);
 	}
 	else if(rcvbuf.childPid != 0) {
 		outputRequest(findTableIndex(rcvbuf.childPid), rcvbuf.childPid, rcvbuf.intData);
@@ -737,6 +740,18 @@ void outputRequest(int chldNum, int chldPid, int address) {
 	else {
 		fprintf(fptr, "oss: P%d, PID %d, requesting read of address %d at time %d:%d\n", chldNum, chldPid, address, simulatedClock[0], simulatedClock[1]);
 	}
+}
+
+void outputStatistics(pid_t terminatedChild) {
+	int entry = findTableIndex(terminatedChild);
+
+	int memAccessTime[2];
+	memAccessTime[0] = processTable[entry].memAccessSeconds;
+	memAccessTime[1] = processTable[entry].memAccessNano;
+
+	int pageFaults = processTable[entry].pageFaults;
+
+	fprintf("P%d, PID %d, terminated with a memory access time of %d:%d and %d page faults.\n", entry, terminatedChild, memAccessTime[0], memAccessTime[1], pageFaults);
 }
 
 void frameDefault(int frameNumber) {
