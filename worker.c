@@ -28,7 +28,7 @@ int RNG(int max) {
 
 int decideAction() {
 	int choice = RNG(100);
-	if(choice < 60)
+	if(choice < 97)
 		return READ;
 	return WRITE;
 }

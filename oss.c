@@ -498,7 +498,6 @@ void processRequest(pid_t childPid, int address, struct Queue *fifoQueue) {
 	int page = abs(address) / KB;
 	int frame = pageFault(childPid, page);
 	int entry = findTableIndex(childPid);
-	outputRequest(entry, childPid, address);
 
 	if(frame == -1) { //PAGE FAULT: set up eventWait for 14ms, add pendingEntry, enqueue blocked queue
 		fprintf(fptr, "oss: Address %d is not in a frame, pagefault.\n", abs(address));
